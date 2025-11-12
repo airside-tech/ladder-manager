@@ -10,24 +10,41 @@ it defaults to 0 (straight section).
 
 
 class Section:
-    def __init__(self, section_id: str, length: float, orientation: str, curved_degree: float = 0.0, 
-                 width: float = 30.0, material: str = "aluminum"):
+    def __init__(
+        self,
+        section_id: str,
+        x_coord: float,
+        y_coord: float,
+        length: float,
+        orientation: str,
+        bend_degree: float = 0.0,
+        width: float = 30.0,
+        material: str = "aluminum",
+    ) -> None:
+        # Identity
         self.section_id = section_id
-        self.length = length          # length in meters
-        self.orientation = orientation # "horizontal" or "vertical"
-        self.width = width            # width in centimeters
+
+        # Geometry
+        self.x_coord = x_coord  # x coordinate start in the layout [m], relative to room origin
+        self.y_coord = y_coord  # y coordinate start in the layout [m], relative to room origin
+        self.length = length    # length in meters
+        self.orientation = orientation  # "horizontal" or "vertical"
+
+        # Physical attributes
+        self.width = width              # width in centimeters
         self.material = material
-        self.curved_degree = curved_degree  # degree of curvature, 0 for straight sections
+        # degree of curvature, 0 for straight sections, +ve for right bend, -ve for left bend
+        self.curved_degree = bend_degree
 
 
 class Ladder:
-    def __init__(self, ladder_id: str):
+    def __init__(self, ladder_id: str) -> None:
         self.ladder_id = ladder_id
-        self.sections = []  # List of Section objects
-    
-    def add_section(self, section: Section) -> None:
+        self.sections: list[Section] = []  # List of Section objects
+
+    def add_section(self, section: "Section") -> None:
         self.sections.append(section)
-    
+
     @property
     def total_length(self) -> float:
         return sum(section.length for section in self.sections)
