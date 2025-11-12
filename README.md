@@ -98,6 +98,31 @@ print(f"Total ladder length: {ladder.total_length}m")
 python example_multi_tile_racks.py
 ```
 
+### GUI (pygame)
+
+A simple interactive GUI is available for sketching rooms, placing 2×2 racks, and drawing ladder sections.
+
+Run the GUI:
+```bash
+python gui_ladder_manager.py
+```
+
+Controls:
+- Left Click: Place ladder segment (click start tile, then end tile)
+- L: Toggle ladder placement mode on/off
+- R: Place a 2×2 rack at the hovered tile (green preview = fits, red = blocked)
+- N: Start a new ladder (finalizes the current one)
+- U: Undo last ladder section
+- X: Delete the last ladder
+- C: Clear the current ladder start point
+- S: Save layout to layout.json
+- O: Load layout from layout.json
+- ESC: Exit
+
+Tips:
+- Occupied tiles have a subtle dark overlay.
+- While placing a ladder, the preview snaps to straight horizontal/vertical lines.
+
 ## Installation
 
 1. Clone the repository
