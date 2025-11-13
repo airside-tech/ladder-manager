@@ -12,9 +12,10 @@ The back-end is written in Python. Front-end framework is not decided.
 - **Physical room representation** with configurable tile grid dimensions
 - **Tile-based floor layout** with customizable tile size (default: 0.6m × 0.6m)
 - **Multi-tile data rack placement** with collision detection and bounds checking
+- **Obstacle support** - place physical barriers (ducts, beams, support columns) that block tile occupancy
 - **Area and volume calculations** for space planning
 - **Tile occupancy tracking** - query occupied and unoccupied tiles
-- Prevents overlapping rack placement automatically
+- Prevents overlapping rack and obstacle placement automatically
 
 #### DataRack
 - **Data center rack management** with standard rack unit (U) calculations
@@ -26,13 +27,20 @@ The back-end is written in Python. Front-end framework is not decided.
 - **Tile footprint calculation** - get all tiles occupied by a rack
 - Rack information export to dictionary format
 
+#### Obstacle
+- **Physical barrier representation** for non-movable structures
+- **Tile-based footprint** - obstacles occupy specific tiles and prevent ladder/rack placement
+- **Configurable dimensions** - width, depth (in tiles), and height (in meters)
+- **Examples:** Ventilation ducts, support beams, columns, HVAC equipment
+
 #### Ladder (Section-based)
 - **Modular ladder construction** from individual sections
 - **Section properties**:
   - Position coordinates (x, y)
   - Length and orientation (horizontal/vertical)
   - Bend degree for curved sections (positive = right, negative = left)
-  - Width and material customization
+  - Width and material customization (30cm, 60cm, 90cm, 120cm widths)
+- **Visual capacity indication** - wider ladders support more cable runs
 - **Total length calculation** across all sections
 - **Support for mixed orientations** and materials in a single ladder
 
@@ -100,28 +108,64 @@ python example_multi_tile_racks.py
 
 ### GUI (pygame)
 
-A simple interactive GUI is available for sketching rooms, placing 2×2 racks, and drawing ladder sections.
+A fully interactive GUI for designing data center layouts with racks, obstacles, and cable ladders.
+
+**Room size:** 25×20 tiles (expandable via zoom)
 
 Run the GUI:
 ```bash
 python gui_ladder_manager.py
 ```
 
-Controls:
-- Left Click: Place ladder segment (click start tile, then end tile)
-- L: Toggle ladder placement mode on/off
-- R: Place a 2×2 rack at the hovered tile (green preview = fits, red = blocked)
-- N: Start a new ladder (finalizes the current one)
-- U: Undo last ladder section
+#### Controls:
+
+**Placement:**
+- R: Place a 2×2 rack
+- B: Place a 1×1 obstacle
+- T: Toggle between rack/obstacle placement modes
+
+**Ladder Mode:**
+- L: Toggle ladder mode on/off
+- Click: Set start point, then end point to place ladder segment
+- N: Start a new ladder (finalize current one)
+- U: Undo the last section
 - X: Delete the last ladder
-- C: Clear the current ladder start point
-- S: Save layout to layout.json
-- O: Load layout from layout.json
+
+**Selection & Editing:**
+- Click: Select a ladder section (shows width and highlights in yellow)
+- DELETE: Remove the selected section
+- C: Clear selection
+
+**View:**
+- Mouse Wheel: Zoom in/out (0.3x to 3.0x)
+- H: Toggle help overlay
+
+**File Operations:**
+- S: Save layout to `layout.json`
+- O: Load layout from `layout.json`
 - ESC: Exit
 
-Tips:
-- Occupied tiles have a subtle dark overlay.
-- While placing a ladder, the preview snaps to straight horizontal/vertical lines.
+#### Features:
+
+**Visual Indicators:**
+- Occupied tiles have a subtle dark overlay
+- Racks are shown in blue with labels
+- Obstacles display with brown hazard stripes
+- Ladder preview snaps to horizontal/vertical alignment
+- Hover previews: green (placeable), red (blocked), brown (obstacle)
+
+**Ladder Width Visualization:**
+- Ladders render with width proportional to their capacity
+- Color-coded for easy identification:
+  - 🟠 Orange: 30cm (small capacity)
+  - 🟡 Yellow-Orange: 60cm (medium capacity)
+  - 🟢 Yellow-Green: 90cm (good capacity)
+  - 💚 Green: 120cm+ (high capacity)
+- Selected sections display their width in cm
+
+**Zoom & Navigation:**
+- Use mouse wheel to zoom from 0.3x (overview) to 3.0x (detail)
+- Larger 25×20 tile room provides more planning space
 
 ## Installation
 
@@ -142,6 +186,7 @@ Tips:
 ladder-manager/
 ├── src/
 │   ├── datarack.py      # DataRack class for rack management
+│   ├── obstacle.py      # Obstacle class for physical barriers
 │   ├── ladder.py        # Ladder and Section classes
 │   ├── room.py          # Room class with tile grid
 │   └── tests/
@@ -149,6 +194,7 @@ ladder-manager/
 │       ├── test_ladder.py
 │       ├── test_room.py
 │       └── test_section.py
+├── gui_ladder_manager.py  # Interactive pygame GUI
 ├── example_multi_tile_racks.py
 ├── requirements.txt
 └── README.md

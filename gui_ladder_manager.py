@@ -24,6 +24,7 @@ import pygame
 from room import Room
 from datarack import DataRack
 from ladder import Ladder, Section
+from obstacle import Obstacle
 import math
 
 # Colors
@@ -39,14 +40,16 @@ DARK_BLUE = (0, 50, 150)
 ORANGE = (255, 165, 0)
 YELLOW = (255, 255, 0)
 PURPLE = (180, 0, 255)
+BROWN = (139, 69, 19)
+DARK_BROWN = (101, 67, 33)
+LIGHT_BROWN = (205, 133, 63)
 
 # Window settings
-WINDOW_WIDTH = 1200
-WINDOW_HEIGHT = 800
-TILE_SIZE = 50  # pixels per tile
+WINDOW_WIDTH = 1400
+WINDOW_HEIGHT = 900
+BASE_TILE_SIZE = 50  # Base pixels per tile (before zoom)
 GRID_OFFSET_X = 50
 GRID_OFFSET_Y = 50
-PANEL_WIDTH = 250
 
 
 class LadderManagerGUI:
@@ -58,23 +61,38 @@ class LadderManagerGUI:
         self.font = pygame.font.Font(None, 24)
         self.small_font = pygame.font.Font(None, 18)
         
-        # Create room (15x12 tiles to fit nicely on screen)
-        self.room = Room(room_id="DC-MAIN", num_tiles_x=15, num_tiles_y=12, height=3.0)
+        # Zoom settings
+        self.zoom_level = 1.0
+        self.min_zoom = 0.3
+        self.max_zoom = 3.0
+        self.zoom_step = 0.1
+        
+        # Create larger room (25x20 tiles to provide more space)
+        self.room = Room(room_id="DC-MAIN", num_tiles_x=25, num_tiles_y=20, height=3.0)
         
         # Ladder management
         self.ladders = []
         self.current_ladder = None
         self.ladder_start_point = None
         self.ladder_mode = False
+        self.selected_section = None  # For selecting and deleting sections
         
         # UI state
         self.selected_tile = None
         self.hover_tile = None
+        self.obstacle_mode = False  # Toggle for placing obstacles
+        self.placement_mode = "rack"  # "rack" or "obstacle"
+        self.show_help = False  # Toggle help overlay with H key
         
         # Pre-populate with data racks in three rows
         self.populate_initial_racks()
         
         self.running = True
+    
+    @property
+    def TILE_SIZE(self):
+        """Get current tile size based on zoom level"""
+        return int(BASE_TILE_SIZE * self.zoom_level)
 
     # ----------------------------
     # Initialization helpers
@@ -83,10 +101,10 @@ class LadderManagerGUI:
     def populate_initial_racks(self):
         """Pre-populate three rows with 2x2 data racks (42U)"""
         rack_id = 1
-        # Three rows: y positions 1, 4, 7
-        for row in [1, 4, 7]:
+        # Three rows: y positions 2, 7, 12
+        for row in [2, 7, 12]:
             # Place racks with 1-tile gap between them
-            for x in range(0, 15, 3):  # 0, 3, 6, 9, 12
+            for x in range(0, 25, 3):  # 0, 3, 6, 9, 12, 15, 18, 21
                 if x + 1 < self.room.num_tiles_x:  # Ensure rack fits
                     rack = DataRack(
                         rack_id=f"RACK-{rack_id:02d}",
@@ -102,8 +120,8 @@ class LadderManagerGUI:
     def get_tile_from_mouse(self, mouse_pos):
         """Convert mouse position to tile coordinates"""
         x, y = mouse_pos
-        tile_x = (x - GRID_OFFSET_X) // TILE_SIZE
-        tile_y = (y - GRID_OFFSET_Y) // TILE_SIZE
+        tile_x = (x - GRID_OFFSET_X) // self.TILE_SIZE
+        tile_y = (y - GRID_OFFSET_Y) // self.TILE_SIZE
         
         if 0 <= tile_x < self.room.num_tiles_x and 0 <= tile_y < self.room.num_tiles_y:
             return (int(tile_x), int(tile_y))
@@ -111,8 +129,8 @@ class LadderManagerGUI:
 
     def get_tile_center(self, tile_x, tile_y):
         """Get pixel coordinates of tile center"""
-        x = GRID_OFFSET_X + tile_x * TILE_SIZE + TILE_SIZE // 2
-        y = GRID_OFFSET_Y + tile_y * TILE_SIZE + TILE_SIZE // 2
+        x = GRID_OFFSET_X + tile_x * self.TILE_SIZE + self.TILE_SIZE // 2
+        y = GRID_OFFSET_Y + tile_y * self.TILE_SIZE + self.TILE_SIZE // 2
         return (x, y)
 
     def draw_grid(self):
@@ -121,10 +139,10 @@ class LadderManagerGUI:
         for x in range(self.room.num_tiles_x):
             for y in range(self.room.num_tiles_y):
                 rect = pygame.Rect(
-                    GRID_OFFSET_X + x * TILE_SIZE,
-                    GRID_OFFSET_Y + y * TILE_SIZE,
-                    TILE_SIZE,
-                    TILE_SIZE
+                    GRID_OFFSET_X + x * self.TILE_SIZE,
+                    GRID_OFFSET_Y + y * self.TILE_SIZE,
+                    self.TILE_SIZE,
+                    self.TILE_SIZE
                 )
                 
                 # Fill tile background
@@ -212,10 +230,10 @@ class LadderManagerGUI:
             max_y = max(t[1] for t in footprint)
             
             rect = pygame.Rect(
-                GRID_OFFSET_X + min_x * TILE_SIZE + 2,
-                GRID_OFFSET_Y + min_y * TILE_SIZE + 2,
-                (max_x - min_x + 1) * TILE_SIZE - 4,
-                (max_y - min_y + 1) * TILE_SIZE - 4
+                GRID_OFFSET_X + min_x * self.TILE_SIZE + 2,
+                GRID_OFFSET_Y + min_y * self.TILE_SIZE + 2,
+                (max_x - min_x + 1) * self.TILE_SIZE - 4,
+                (max_y - min_y + 1) * self.TILE_SIZE - 4
             )
             
             # Draw rack
@@ -230,23 +248,127 @@ class LadderManagerGUI:
         # Draw a hover preview for a 2x2 rack (green if placeable, red if blocked)
         self.draw_hover_rack_preview()
 
+    def draw_obstacles(self):
+        """Draw all obstacles"""
+        for obstacle in self.room.obstacles:
+            footprint = obstacle.get_tile_footprint()
+            
+            # Calculate obstacle rectangle
+            min_x = min(t[0] for t in footprint)
+            min_y = min(t[1] for t in footprint)
+            max_x = max(t[0] for t in footprint)
+            max_y = max(t[1] for t in footprint)
+            
+            rect = pygame.Rect(
+                GRID_OFFSET_X + min_x * self.TILE_SIZE + 2,
+                GRID_OFFSET_Y + min_y * self.TILE_SIZE + 2,
+                (max_x - min_x + 1) * self.TILE_SIZE - 4,
+                (max_y - min_y + 1) * self.TILE_SIZE - 4
+            )
+            
+            # Draw obstacle with brown/hazard pattern
+            pygame.draw.rect(self.screen, DARK_BROWN, rect)
+            pygame.draw.rect(self.screen, BROWN, rect, 3)
+            
+            # Draw diagonal stripes for obstacle pattern
+            stripe_spacing = 8
+            for i in range(0, rect.width + rect.height, stripe_spacing):
+                start_x = rect.left + i
+                start_y = rect.top
+                end_x = rect.left
+                end_y = rect.top + i
+                
+                if start_x > rect.right:
+                    start_x = rect.right
+                    start_y = rect.top + (i - rect.width)
+                
+                if end_y > rect.bottom:
+                    end_y = rect.bottom
+                    end_x = rect.left + (i - rect.height)
+                
+                pygame.draw.line(self.screen, LIGHT_BROWN, (start_x, start_y), (end_x, end_y), 2)
+            
+            # Draw obstacle label
+            label = self.small_font.render(obstacle.obstacle_id, True, WHITE)
+            label_rect = label.get_rect(center=rect.center)
+            self.screen.blit(label, label_rect)
+
+        # Draw hover preview for obstacle placement
+        self.draw_hover_obstacle_preview()
+
+
     def draw_ladders(self):
-        """Draw all ladder segments"""
+        """Draw all ladder segments with width visualization"""
         for ladder in self.ladders:
             for section in ladder.sections:
                 start = self.get_tile_center(int(section.x_coord), int(section.y_coord))
                 
                 # Calculate end point based on orientation and length
                 if section.orientation == "horizontal":
-                    end = (start[0] + int(section.length * TILE_SIZE), start[1])
+                    end = (start[0] + int(section.length * self.TILE_SIZE), start[1])
                 else:  # vertical
-                    end = (start[0], start[1] + int(section.length * TILE_SIZE))
+                    end = (start[0], start[1] + int(section.length * self.TILE_SIZE))
                 
-                # Draw ladder segment
-                pygame.draw.line(self.screen, ORANGE, start, end, 4)
+                # Calculate line width based on ladder width (cm to pixels)
+                # Standard widths: 30cm, 60cm, 90cm, 120cm
+                # Map to reasonable pixel widths: 4, 8, 12, 16
+                ladder_width_cm = getattr(section, 'width', 30.0)
+                line_width = max(3, int(ladder_width_cm / 10))  # Scale: 30cm -> 3px, 60cm -> 6px, etc.
+                
+                # Color based on width (capacity indicator)
+                if ladder_width_cm <= 30:
+                    color = ORANGE  # Small capacity
+                elif ladder_width_cm <= 60:
+                    color = (255, 200, 0)  # Medium capacity (yellow-orange)
+                elif ladder_width_cm <= 90:
+                    color = (200, 255, 0)  # Good capacity (yellow-green)
+                else:
+                    color = GREEN  # High capacity
+                
+                # Highlight selected section
+                if self.selected_section == section:
+                    color = YELLOW
+                    line_width += 2
+                
+                # Draw ladder segment as a thick line
+                pygame.draw.line(self.screen, color, start, end, line_width)
+                
+                # Draw borders for better visibility
+                if section.orientation == "horizontal":
+                    # Top and bottom borders
+                    offset = line_width // 2
+                    pygame.draw.line(self.screen, DARK_GRAY, 
+                                   (start[0], start[1] - offset), 
+                                   (end[0], end[1] - offset), 1)
+                    pygame.draw.line(self.screen, DARK_GRAY, 
+                                   (start[0], start[1] + offset), 
+                                   (end[0], end[1] + offset), 1)
+                else:
+                    # Left and right borders
+                    offset = line_width // 2
+                    pygame.draw.line(self.screen, DARK_GRAY, 
+                                   (start[0] - offset, start[1]), 
+                                   (end[0] - offset, end[1]), 1)
+                    pygame.draw.line(self.screen, DARK_GRAY, 
+                                   (start[0] + offset, start[1]), 
+                                   (end[0] + offset, end[1]), 1)
+                
                 # Draw end points
-                pygame.draw.circle(self.screen, RED, start, 6)
-                pygame.draw.circle(self.screen, RED, end, 6)
+                pygame.draw.circle(self.screen, RED, start, 4)
+                pygame.draw.circle(self.screen, RED, end, 4)
+                
+                # Draw width label for selected or hovered section
+                if self.selected_section == section:
+                    mid_x = (start[0] + end[0]) // 2
+                    mid_y = (start[1] + end[1]) // 2
+                    label = self.small_font.render(f"{int(ladder_width_cm)}cm", True, BLACK)
+                    
+                    # Background for label
+                    label_bg = pygame.Surface((label.get_width() + 4, label.get_height() + 2), pygame.SRCALPHA)
+                    label_bg.fill((255, 255, 255, 200))
+                    self.screen.blit(label_bg, (mid_x - label.get_width() // 2 - 2, mid_y - label.get_height() // 2 - 1))
+                    self.screen.blit(label, (mid_x - label.get_width() // 2, mid_y - label.get_height() // 2))
+
 
     def draw_ladder_preview(self, mouse_pos):
         """Draw preview of ladder segment being placed"""
@@ -269,46 +391,115 @@ class LadderManagerGUI:
             pygame.draw.line(self.screen, YELLOW, start, snapped_end, 3)
             pygame.draw.circle(self.screen, YELLOW, start, 6)
 
-    def draw_panel(self):
-        """Draw the control panel"""
-        panel_x = GRID_OFFSET_X + self.room.num_tiles_x * TILE_SIZE + 20
-        panel_rect = pygame.Rect(panel_x, GRID_OFFSET_Y, PANEL_WIDTH, WINDOW_HEIGHT - GRID_OFFSET_Y * 2)
-        pygame.draw.rect(self.screen, LIGHT_GRAY, panel_rect)
-        pygame.draw.rect(self.screen, DARK_GRAY, panel_rect, 2)
+    def draw_help_overlay(self):
+        """Draw a semi-transparent help overlay when toggled with H key"""
+        if not self.show_help:
+            return
         
-        y_offset = GRID_OFFSET_Y + 20
+        # Semi-transparent background
+        overlay = pygame.Surface((WINDOW_WIDTH, WINDOW_HEIGHT), pygame.SRCALPHA)
+        overlay.fill((0, 0, 0, 180))
+        self.screen.blit(overlay, (0, 0))
+        
+        # Help panel in center
+        panel_width = 400
+        panel_height = 550
+        panel_x = (WINDOW_WIDTH - panel_width) // 2
+        panel_y = (WINDOW_HEIGHT - panel_height) // 2
+        
+        panel_rect = pygame.Rect(panel_x, panel_y, panel_width, panel_height)
+        pygame.draw.rect(self.screen, LIGHT_GRAY, panel_rect)
+        pygame.draw.rect(self.screen, DARK_GRAY, panel_rect, 3)
+        
+        y_offset = panel_y + 20
         
         # Title
-        title = self.font.render("Controls", True, BLACK)
-        self.screen.blit(title, (panel_x + 10, y_offset))
-        y_offset += 40
+        title = self.font.render("CONTROLS (Press H to close)", True, BLACK)
+        title_rect = title.get_rect(center=(panel_x + panel_width // 2, y_offset))
+        self.screen.blit(title, title_rect)
+        y_offset += 50
         
-        # Instructions
-        instructions = [
-            "Left Click: Place ladder",
-            "  (click start, then end)",
-            "",
+        # Instructions in two columns
+        left_col_x = panel_x + 20
+        right_col_x = panel_x + panel_width // 2 + 10
+        
+        left_instructions = [
+            "PLACEMENT:",
             "R: Add Rack (2x2)",
+            "B: Add Obstacle (1x1)",
+            "T: Toggle Rack/Obstacle",
+            "",
+            "LADDER:",
             "L: Toggle ladder mode",
+            "Click: Start/End point",
             "N: Start new ladder",
             "U: Undo last section",
             "X: Delete last ladder",
-            "C: Clear current ladder",
-            "S: Save layout (layout.json)",
-            "O: Open layout (layout.json)",
-            "ESC: Exit",
             "",
-            f"Ladder Mode: {'ON' if self.ladder_mode else 'OFF'}",
-            "",
-            f"Racks: {len(self.room.data_racks)}",
-            f"Ladders: {len(self.ladders)}",
-            f"Occupied: {len(self.room.get_occupied_tiles())}",
+            "SELECTION:",
+            "Click: Select section",
+            "DEL: Remove selected",
+            "C: Clear selection",
         ]
         
-        for instruction in instructions:
-            text = self.small_font.render(instruction, True, BLACK)
-            self.screen.blit(text, (panel_x + 10, y_offset))
+        right_instructions = [
+            "VIEW:",
+            "Mouse Wheel: Zoom",
+            "H: Toggle help",
+            "",
+            "FILE:",
+            "S: Save layout",
+            "O: Open layout",
+            "ESC: Exit",
+            "",
+            "STATUS:",
+            f"Ladder: {'ON' if self.ladder_mode else 'OFF'}",
+            f"Mode: {self.placement_mode.upper()}",
+            f"Zoom: {self.zoom_level:.1f}x",
+            "",
+            f"Racks: {len(self.room.data_racks)}",
+            f"Obstacles: {len(self.room.obstacles)}",
+            f"Ladders: {len(self.ladders)}",
+        ]
+        
+        # Draw left column
+        for instruction in left_instructions:
+            if instruction.endswith(":"):
+                text = self.small_font.render(instruction, True, DARK_BLUE)
+            else:
+                text = self.small_font.render(instruction, True, BLACK)
+            self.screen.blit(text, (left_col_x, y_offset))
             y_offset += 22
+        
+        # Draw right column
+        y_offset = panel_y + 70
+        for instruction in right_instructions:
+            if instruction.endswith(":"):
+                text = self.small_font.render(instruction, True, DARK_BLUE)
+            else:
+                text = self.small_font.render(instruction, True, BLACK)
+            self.screen.blit(text, (right_col_x, y_offset))
+            y_offset += 22
+        
+        # Draw color legend for ladders at bottom
+        y_offset = panel_y + panel_height - 80
+        legend_title = self.small_font.render("LADDER WIDTH COLOR CODE:", True, DARK_BLUE)
+        self.screen.blit(legend_title, (left_col_x, y_offset))
+        y_offset += 25
+        
+        colors_and_labels = [
+            (ORANGE, "30cm (small)"),
+            ((255, 200, 0), "60cm (medium)"),
+            ((200, 255, 0), "90cm (good)"),
+            (GREEN, "120cm+ (high)"),
+        ]
+        
+        for color, label in colors_and_labels:
+            pygame.draw.rect(self.screen, color, (left_col_x, y_offset, 20, 12))
+            pygame.draw.rect(self.screen, BLACK, (left_col_x, y_offset, 20, 12), 1)
+            text = self.small_font.render(label, True, BLACK)
+            self.screen.blit(text, (left_col_x + 25, y_offset - 2))
+            y_offset += 16
 
     def add_ladder_segment(self, start_tile, end_tile):
         """Add a new ladder segment between two tiles"""
@@ -360,8 +551,8 @@ class LadderManagerGUI:
         """Draw a 2x2 rack placement preview at hover tile (green=ok, red=blocked)."""
         if self.hover_tile is None:
             return
-        # Don’t draw preview while actively placing ladder to reduce clutter
-        if self.ladder_mode:
+        # Don't draw preview while actively placing ladder to reduce clutter
+        if self.ladder_mode or self.placement_mode != "rack":
             return
 
         tx, ty = self.hover_tile
@@ -369,13 +560,36 @@ class LadderManagerGUI:
         color = (0, 255, 0, 80) if fits else (255, 0, 0, 80)
 
         # Draw translucent rect over the 2x2 area
-        s = pygame.Surface((TILE_SIZE * 2 - 4, TILE_SIZE * 2 - 4), pygame.SRCALPHA)
+        s = pygame.Surface((self.TILE_SIZE * 2 - 4, self.TILE_SIZE * 2 - 4), pygame.SRCALPHA)
         s.fill(color)
         self.screen.blit(
             s,
             (
-                GRID_OFFSET_X + tx * TILE_SIZE + 2,
-                GRID_OFFSET_Y + ty * TILE_SIZE + 2,
+                GRID_OFFSET_X + tx * self.TILE_SIZE + 2,
+                GRID_OFFSET_Y + ty * self.TILE_SIZE + 2,
+            ),
+        )
+    
+    def draw_hover_obstacle_preview(self):
+        """Draw a 1x1 obstacle placement preview at hover tile (brown=ok, red=blocked)."""
+        if self.hover_tile is None:
+            return
+        # Only draw when in obstacle placement mode
+        if self.ladder_mode or self.placement_mode != "obstacle":
+            return
+
+        tx, ty = self.hover_tile
+        fits = self.can_place_rack(tx, ty, 1, 1)  # Reuse rack placement check for single tile
+        color = (139, 69, 19, 120) if fits else (255, 0, 0, 80)  # Brown or red
+
+        # Draw translucent rect over the 1x1 area
+        s = pygame.Surface((self.TILE_SIZE - 4, self.TILE_SIZE - 4), pygame.SRCALPHA)
+        s.fill(color)
+        self.screen.blit(
+            s,
+            (
+                GRID_OFFSET_X + tx * self.TILE_SIZE + 2,
+                GRID_OFFSET_Y + ty * self.TILE_SIZE + 2,
             ),
         )
 
@@ -393,13 +607,52 @@ class LadderManagerGUI:
             print(f"Added {rack.rack_id} at ({tile_x}, {tile_y})")
         else:
             print(f"Failed to place rack at ({tile_x}, {tile_y}) - tiles occupied or out of bounds")
+    
+    def add_obstacle_at_tile(self, tile_x, tile_y):
+        """Add a new 1x1 obstacle at the specified tile"""
+        obstacle = Obstacle(
+            obstacle_id=f"OBS-{len(self.room.obstacles) + 1:02d}",
+            position_x=tile_x,
+            position_y=tile_y,
+            width_tiles=1,
+            depth_tiles=1,
+            height=2.0
+        )
+        if self.room.add_obstacle(obstacle):
+            print(f"Added {obstacle.obstacle_id} at ({tile_x}, {tile_y})")
+        else:
+            print(f"Failed to place obstacle at ({tile_x}, {tile_y}) - tiles occupied or out of bounds")
+    
+    def get_section_at_position(self, pixel_pos):
+        """Find a ladder section at the given pixel position (for selection)."""
+        x, y = pixel_pos
+        tolerance = 10  # pixels
+        
+        for ladder in self.ladders:
+            for section in ladder.sections:
+                start = self.get_tile_center(int(section.x_coord), int(section.y_coord))
+                
+                if section.orientation == "horizontal":
+                    end = (start[0] + int(section.length * self.TILE_SIZE), start[1])
+                    # Check if click is near the horizontal line
+                    if (min(start[0], end[0]) - tolerance <= x <= max(start[0], end[0]) + tolerance and
+                        abs(y - start[1]) <= tolerance):
+                        return section, ladder
+                else:  # vertical
+                    end = (start[0], start[1] + int(section.length * self.TILE_SIZE))
+                    # Check if click is near the vertical line
+                    if (abs(x - start[0]) <= tolerance and
+                        min(start[1], end[1]) - tolerance <= y <= max(start[1], end[1]) + tolerance):
+                        return section, ladder
+        
+        return None, None
 
     # ----------------------------
     # Save / Load
     # ----------------------------
 
     def save_layout(self, path: str = "layout.json"):
-        """Save room, racks, and ladders to a JSON file."""
+        """Save room, racks, obstacles, and ladders to a JSON file."""
         import json
 
         data = {
@@ -420,6 +673,17 @@ class LadderManagerGUI:
                     "depth_tiles": getattr(r, "depth_tiles", 1),
                 }
                 for r in self.room.data_racks
+            ],
+            "obstacles": [
+                {
+                    "obstacle_id": o.obstacle_id,
+                    "position_x": o.position_x,
+                    "position_y": o.position_y,
+                    "width_tiles": getattr(o, "width_tiles", 1),
+                    "depth_tiles": getattr(o, "depth_tiles", 1),
+                    "height": getattr(o, "height", 1.0),
+                }
+                for o in self.room.obstacles
             ],
             "ladders": [
                 {
@@ -482,6 +746,22 @@ class LadderManagerGUI:
             if not placed:
                 print(f"Warning: could not place rack {rack.rack_id} from file (occupied/out of bounds)")
 
+        # Obstacles
+        self.room.obstacles.clear()
+        for o in data.get("obstacles", []):
+            obstacle = Obstacle(
+                obstacle_id=o["obstacle_id"],
+                position_x=int(o["position_x"]),
+                position_y=int(o["position_y"]),
+                width_tiles=int(o.get("width_tiles", 1)),
+                depth_tiles=int(o.get("depth_tiles", 1)),
+                height=float(o.get("height", 1.0)),
+            )
+            # Use add_obstacle to set occupancy
+            placed = self.room.add_obstacle(obstacle)
+            if not placed:
+                print(f"Warning: could not place obstacle {obstacle.obstacle_id} from file (occupied/out of bounds)")
+
         # Ladders
         self.ladders = []
         self.current_ladder = None
@@ -508,14 +788,14 @@ class LadderManagerGUI:
     # ----------------------------
     def draw_occupied_overlay(self):
         """Light overlay on occupied tiles for quick visual feedback."""
-        overlay = pygame.Surface((TILE_SIZE - 6, TILE_SIZE - 6), pygame.SRCALPHA)
+        overlay = pygame.Surface((self.TILE_SIZE - 6, self.TILE_SIZE - 6), pygame.SRCALPHA)
         overlay.fill((0, 0, 0, 25))
         for (x, y) in self.room.get_occupied_tiles():
             self.screen.blit(
                 overlay,
                 (
-                    GRID_OFFSET_X + x * TILE_SIZE + 3,
-                    GRID_OFFSET_Y + y * TILE_SIZE + 3,
+                    GRID_OFFSET_X + x * self.TILE_SIZE + 3,
+                    GRID_OFFSET_Y + y * self.TILE_SIZE + 3,
                 ),
             )
 
@@ -528,16 +808,33 @@ class LadderManagerGUI:
             elif event.type == pygame.MOUSEMOTION:
                 self.hover_tile = self.get_tile_from_mouse(event.pos)
             
+            elif event.type == pygame.MOUSEWHEEL:
+                # Zoom in/out with mouse wheel
+                if event.y > 0:  # Scroll up = zoom in
+                    self.zoom_level = min(self.max_zoom, self.zoom_level + self.zoom_step)
+                    print(f"Zoom: {self.zoom_level:.1f}x")
+                elif event.y < 0:  # Scroll down = zoom out
+                    self.zoom_level = max(self.min_zoom, self.zoom_level - self.zoom_step)
+                    print(f"Zoom: {self.zoom_level:.1f}x")
+            
             elif event.type == pygame.MOUSEBUTTONDOWN:
                 if event.button == 1:  # Left click
                     tile = self.get_tile_from_mouse(event.pos)
-                    if tile and self.ladder_mode:
+                    if self.ladder_mode and tile:
                         if self.ladder_start_point is None:
                             self.ladder_start_point = tile
                         else:
                             # Place ladder segment
                             self.add_ladder_segment(self.ladder_start_point, tile)
                             self.ladder_start_point = None
+                    elif not self.ladder_mode:
+                        # Try to select a ladder section
+                        section, ladder = self.get_section_at_position(event.pos)
+                        if section:
+                            self.selected_section = section
+                            print(f"Selected section {section.section_id} from {ladder.ladder_id} ({int(section.width)}cm wide)")
+                        else:
+                            self.selected_section = None
             
             elif event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_ESCAPE:
@@ -545,19 +842,46 @@ class LadderManagerGUI:
                 
                 elif event.key == pygame.K_r:
                     # Add rack at hover tile
-                    if self.hover_tile:
+                    if self.hover_tile and self.placement_mode == "rack":
                         self.add_rack_at_tile(*self.hover_tile)
+                
+                elif event.key == pygame.K_b:
+                    # Add obstacle at hover tile
+                    if self.hover_tile and self.placement_mode == "obstacle":
+                        self.add_obstacle_at_tile(*self.hover_tile)
+                
+                elif event.key == pygame.K_t:
+                    # Toggle between rack and obstacle placement mode
+                    self.placement_mode = "obstacle" if self.placement_mode == "rack" else "rack"
+                    print(f"Placement mode: {self.placement_mode.upper()}")
                 
                 elif event.key == pygame.K_l:
                     # Toggle ladder mode
                     self.ladder_mode = not self.ladder_mode
                     self.ladder_start_point = None
+                    self.selected_section = None
                     print(f"Ladder mode: {'ON' if self.ladder_mode else 'OFF'}")
                 
                 elif event.key == pygame.K_c:
-                    # Clear current ladder segment
+                    # Clear selection and ladder start point
                     self.ladder_start_point = None
-                    print("Cleared ladder start point")
+                    self.selected_section = None
+                    print("Cleared selection")
+                
+                elif event.key == pygame.K_DELETE:
+                    # Delete selected section
+                    if self.selected_section:
+                        # Find which ladder contains this section
+                        for ladder in self.ladders:
+                            if self.selected_section in ladder.sections:
+                                ladder.sections.remove(self.selected_section)
+                                print(f"Deleted section {self.selected_section.section_id}")
+                                # If ladder is now empty, remove it
+                                if not ladder.sections:
+                                    self.ladders.remove(ladder)
+                                    print(f"Removed empty ladder {ladder.ladder_id}")
+                                self.selected_section = None
+                                break
 
                 elif event.key == pygame.K_n:
                     # Finalize current ladder and start a new one on next section
@@ -597,6 +921,11 @@ class LadderManagerGUI:
                 elif event.key == pygame.K_o:
                     # Load layout
                     self.load_layout("layout.json")
+                
+                elif event.key == pygame.K_h:
+                    # Toggle help overlay
+                    self.show_help = not self.show_help
+                    print(f"Help overlay: {'ON' if self.show_help else 'OFF'}")
 
     def run(self):
         """Main game loop"""
@@ -607,6 +936,7 @@ class LadderManagerGUI:
             self.screen.fill(WHITE)
             self.draw_grid()
             self.draw_racks()
+            self.draw_obstacles()
             self.draw_ladders()
             
             # Draw ladder preview if in ladder mode
@@ -614,7 +944,8 @@ class LadderManagerGUI:
                 mouse_pos = pygame.mouse.get_pos()
                 self.draw_ladder_preview(mouse_pos)
             
-            self.draw_panel()
+            # Draw help overlay (on top of everything if toggled)
+            self.draw_help_overlay()
             
             pygame.display.flip()
             self.clock.tick(60)  # 60 FPS

@@ -43,7 +43,12 @@ class Ladder:
         self.sections: list[Section] = []  # List of Section objects
 
     def add_section(self, section: "Section") -> None:
+        # Add a Section object to the ladder
         self.sections.append(section)
+
+    def remove_section(self, section_id: str) -> None:
+        # Remove section by its ID
+        self.sections = [s for s in self.sections if s.section_id != section_id]
 
     @property
     def total_length(self) -> float:

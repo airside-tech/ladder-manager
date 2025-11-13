@@ -29,6 +29,7 @@ class Room:
         ]  # False indicates unoccupied tile
 
         self.data_racks = []  # List of DataRack objects in the room
+        self.obstacles = []   # List of Obstacle objects in the room
 
 
 
@@ -71,6 +72,28 @@ class Room:
         self.data_racks.append(rack)
         return True
 
+    def remove_data_rack(self, rack) -> bool:
+        """
+        Remove a data rack from the room and free its tiles.
+        
+        Args:
+            rack: The DataRack object to remove
+        Returns:
+            bool: True if rack was removed, False if not found
+        """
+        if rack not in self.data_racks:
+            return False
+        
+        # Free all tiles occupied by this rack
+        footprint = rack.get_tile_footprint()
+        for tile_x, tile_y in footprint:
+            if 0 <= tile_x < self.num_tiles_x and 0 <= tile_y < self.num_tiles_y:
+                self.tile_grid[tile_x][tile_y] = False
+        
+        # Remove the rack reference
+        self.data_racks.remove(rack)
+        return True
+
 
     def is_tile_occupied(self, tile_x: int, tile_y: int) -> bool:
         """Check if a specific tile is occupied."""
@@ -95,3 +118,54 @@ class Room:
                 if not self.tile_grid[x][y]:
                     unoccupied_tiles.append((x, y))
         return unoccupied_tiles
+    
+    def add_obstacle(self, obstacle) -> bool:
+        """
+        Add an obstacle to the room and mark all occupied tiles.
+        
+        Args:
+            obstacle: An Obstacle object to place in the room
+            
+        Returns:
+            bool: True if obstacle was successfully placed, False if tiles are out of bounds or already occupied
+        """
+        # Get all tiles this obstacle will occupy
+        footprint = obstacle.get_tile_footprint()
+        
+        # Check if all tiles are within bounds and unoccupied
+        for tile_x, tile_y in footprint:
+            if tile_x < 0 or tile_x >= self.num_tiles_x or tile_y < 0 or tile_y >= self.num_tiles_y:
+                return False  # Out of bounds
+            if self.tile_grid[tile_x][tile_y]:
+                return False  # Tile already occupied
+        
+        # All tiles are valid, mark them as occupied
+        for tile_x, tile_y in footprint:
+            self.tile_grid[tile_x][tile_y] = True
+        
+        # Store the obstacle reference
+        self.obstacles.append(obstacle)
+        return True
+    
+    def remove_obstacle(self, obstacle) -> bool:
+        """
+        Remove an obstacle from the room and free its tiles.
+        
+        Args:
+            obstacle: The Obstacle object to remove
+            
+        Returns:
+            bool: True if obstacle was removed, False if not found
+        """
+        if obstacle not in self.obstacles:
+            return False
+        
+        # Free all tiles occupied by this obstacle
+        footprint = obstacle.get_tile_footprint()
+        for tile_x, tile_y in footprint:
+            if 0 <= tile_x < self.num_tiles_x and 0 <= tile_y < self.num_tiles_y:
+                self.tile_grid[tile_x][tile_y] = False
+        
+        # Remove the obstacle reference
+        self.obstacles.remove(obstacle)
+        return True

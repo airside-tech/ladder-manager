@@ -43,6 +43,23 @@ class TestLadderSections:
         assert len(ladder.sections) == 1
         assert ladder.sections[0] == section
 
+    def test_remove_section(self):
+        """Test removing a section from ladder"""
+        ladder = Ladder("LAD018")
+        section1 = Section("SEC001", 0.0, 0.0, 1.5, "horizontal")
+        section2 = Section("SEC002", 1.5, 0.0, 1.5, "horizontal")
+        
+        ladder.add_section(section1)
+        ladder.add_section(section2)
+        
+        assert len(ladder.sections) == 2
+        
+        ladder.remove_section("SEC001")
+        
+        assert len(ladder.sections) == 1
+        assert ladder.sections[0] == section2
+        
+
     def test_add_multiple_sections(self):
         """Test adding multiple sections to ladder"""
         ladder = Ladder("LAD003")
